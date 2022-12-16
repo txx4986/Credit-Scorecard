@@ -1,0 +1,697 @@
+---
+title: "Consumer Credit Risk Modelling Coursework"
+author: "Tan Xiao Xuan"
+date: "2022-11-29"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Q1
+```{r}
+load("~/Desktop/Year 3/MATH60131 Consumer Credit Risk Modelling/Coursework/LCdata_2.RData")
+```
+
+# Q2
+```{r}
+D2 <- D1[c("loan_amnt", "grade", "emp_length_p", "term", "addr_state", "def_flag")]
+summary(factor(D2$def_flag))
+```
+
+```{r}
+D2$def_flag <- 1 - as.numeric(D2$def_flag)
+summary(factor(D2$def_flag))
+```
+
+There are 7956 missing values for the predictor emp_length_p. We will impute the missing values with the mean.
+```{r}
+sum(is.na(D2$emp_length_p))
+barplot(table(D2$emp_length_p))
+D2$emp_length_p[is.na(D2$emp_length_p)] <- mean(D2$emp_length_p,na.rm = TRUE)
+```
+
+The predictor term has two values 36 months or 60 months. We will replace 36 months with 0 and 60 months with 1.
+```{r}
+summary(factor(D2$term))
+D2$term[which(D2$term==36)] <- 0
+D2$term[which(D2$term==60)] <- 1
+```
+
+The predictor addr_state has 50 unique values, thus it is not feasible to enter them in the model as a series of indicator variables. We will substitute the predictor addr_state with the continuous weights of evidence for each value.
+```{r}
+woe.tab <- function(x, y) {
+  n1 <- sum(y)
+  n0 <- sum(1 - y)
+  nx0n1 <- tapply(1 - y, x, sum) * n1 
+  nx1n0 <- tapply(y, x, sum) * n0 
+  nx0n1[which(nx0n1==0)] <- n1
+  nx1n0[which(nx1n0==0)] <- n0
+  return(log(nx0n1) - log(nx1n0))
+}
+
+woe.assign <- function(wtab, x) {
+  w <- rep(0, length(x)) 
+  ni <- names(wtab)
+  for (i in 1:length(ni)) {
+    w[which(x==ni[i])] <- wtab[i] 
+  }
+  return(w)
+}
+
+summary(factor(D2$addr_state))
+D2$addr_state <- woe.assign(woe.tab(D2$addr_state, D2$def_flag), D2$addr_state)
+```
+
+# Q3
+```{r}
+set.seed(1)
+ix <- sample(157085, 52361, replace=FALSE)
+D2_test <- D2[ix,]
+D2_train <- D2[-ix,]
+```
+
+# Q4
+```{r}
+glm1.out <- glm(def_flag ~ ., data = D2_train, family = binomial("logit"))
+summary(glm1.out)
+```
+
+# Q5
+The predictor loan_amnt does not show evidence of association with defaut, at a 1% significance level. There is sufficient evidence, at 1% significance level, that there is an association with default for the rest of the predictors: grade, emp_length_p, term and addr_state are significant at the significance level of 0.01. The coefficient of grade is negative, thus affirming our assumption above that a higher grade has a negative association with creditworthiness. The coefficient of emp_length_p is positive, thus a longer employment length has positive association with creditworthiness. The coefficient of term is positive, thus a loan term of 60 months has positive association with creditworthiness relative to a loan term of 36 months.
+
+# Q6
+The AUC of the training data set is slightly greater than the AUC of the test data set. This is as expected because the training data set should in general fit the model better than the test data set as the the model was built using the training data set.
+```{r}
+# ROC function
+roc <- function(y, s){
+  yav <- rep(tapply(y, s, mean), table(s))
+  rocx <- cumsum(yav)
+  rocy <- cumsum(1 - yav)
+  area <- sum(yav * (rocy - 0.5 * (1 - yav)))
+  x1 <- c(0, rocx) / sum(y)
+  y1 <- c(0, rocy) / sum(1 - y)
+  auc <- area / (sum(y) * sum(1 - y))
+  print(auc)
+  plot(x1, y1, "l", xlab="False positive rate", ylab="True positive rate")
+}
+
+yp1 <- predict(glm1.out, D2_test, type="response")
+roc(D2_train$def_flag, glm1.out$fitted.values)
+title(main="ROC curve for training data set")
+text(x = 0.15, y = 0.8, "AUC=0.6710212", cex=1.3)
+roc(D2_test$def_flag, yp1)
+title(main="ROC curve for test data set")
+text(x = 0.15, y = 0.8, "AUC=0.6684568", cex=1.3)
+```
+
+# Q7
+```{r}
+D3 <- data.frame(D1)
+D3$def_flag <- 1 - as.numeric(D3$def_flag)
+summary(factor(D3$def_flag))
+```
+
+
+```{r}
+# addr_state
+D3$addr_state <- woe.assign(woe.tab(D3$addr_state, D3$def_flag), D3$addr_state)
+```
+
+From the boxplot, we notice that there are two extreme outliers of 4900000 and 7500000, causing the boxplot to be squashed. We will remove two of these records from the data set. The histogram is still right-skew after removing the extreme outliers, thus we will apply logarithm to the predictor so that it has distribution closer to normal.
+```{r}
+hist(D3$annual_inc, freq=FALSE, main="Histogram of annual_inc", xlab="annual_inc")
+hist(log(D3$annual_inc), freq=FALSE, main="Histogram of log(annual_inc)", xlab="log(annual_inc)")
+D3$annual_inc <- log(D3$annual_inc)
+```
+
+From the boxplot, we can observe that there are 4 extreme outliers above 400000, causing the boxplot to be squashed. We will remove 4 of these records from the data set. The histogram is still right-skew after removing the extreme outliers, thus we will apply logarithm to the predictor so that it has distribution closer to normal.
+```{r}
+# avg_cur_bal
+D3$avg_cur_bal[is.na(D3$avg_cur_bal)] <- mean(D3$avg_cur_bal,na.rm = TRUE)
+hist(D3$avg_cur_bal, freq=FALSE, main="Histogram of avg_cur_bal", xlab="avg_cur_bal")
+hist(log(D3$avg_cur_bal + 100), freq=FALSE, main="Histogram of log(avg_cur_bal + 100)", xlab="log(avg_cur_bal + 100)")
+D3$avg_cur_bal <- log(D3$avg_cur_bal + 100)
+```
+
+
+```{r}
+# emp_length_p
+D3$emp_length_p[is.na(D3$emp_length_p)] <- mean(D3$emp_length_p,na.rm = TRUE)
+```
+
+We will include home_ownership as two dummy variables for rent and own, with excluded category mortgage.
+```{r}
+# home_ownership
+summary(factor(D3$home_ownership))
+barplot(table(D3$def_flag, D3$home_ownership), col=c("#00BFC4", "#F8766D"), legend = c('default', 'non-default'), args.legend = list(x = "topright",inset = c(0.05, 0)), main="Barplot of home_ownership")
+D3$rent <- as.numeric(D3$home_ownership=='RENT')
+D3$own <- as.numeric(D3$home_ownership=='OWN')
+D3 <- subset(D3, select = -c(home_ownership))
+```
+
+We will replace f with 0 and w with 1.
+```{r}
+# initial_list_status
+summary(factor(D3$initial_list_status))
+barplot(table(D3$def_flag, D3$initial_list_status), col=c("#00BFC4", "#F8766D"), legend = c('default', 'non-default'), args.legend = list(x = "topleft",inset = c(0.05, -0.12)), main="Barplot of initial_list_status")
+D3$initial_list_status <- as.character(D3$initial_list_status)
+D3$initial_list_status[which(D3$initial_list_status=='f')] <- 0
+D3$initial_list_status[which(D3$initial_list_status=='w')] <- 1
+```
+
+This would be data leakage, we wouldn't know beforehand whether or not a loan would be issued when using our model, so in theory we wouldn't have an issue_date, drop this feature.
+```{r}
+# issue_d
+summary(factor(D3$issue_d))
+D3$issue_d <- gsub("-2014","",as.character(D3$issue_d))
+D3$issue_d <- factor(D3$issue_d, levels=month.abb)
+barplot(table(D3$def_flag, D3$issue_d), col=c("#00BFC4", "#F8766D"), legend = c('default', 'non-default'), args.legend = list(x = "topleft",inset = c(0.05, 0)), main="Barplot of issue_d")
+D3 <- subset(D3, select = -c(issue_d))
+```
+
+```{r}
+# mo_sin_old_rev_tl_op
+summary(D3$mo_sin_old_rev_tl_op)
+hist(D3$mo_sin_old_rev_tl_op, freq=FALSE, main="Histogram of mo_sin_old_rev_tl_op", xlab="mo_sin_old_rev_tl_op")
+hist(sqrt(D3$mo_sin_old_rev_tl_op), freq=FALSE, main="Histogram of sqrt(mo_sin_old_rev_tl_op)", xlab="sqrt(mo_sin_old_rev_tl_op)")
+boxplot(D3$mo_sin_old_rev_tl_op, range=1.5)
+D3$mo_sin_old_rev_tl_op <- sqrt(D3$mo_sin_old_rev_tl_op)
+```
+
+```{r}
+# mo_sin_rcnt_rev_tl_op
+summary(D3$mo_sin_rcnt_rev_tl_op)
+hist(D3$mo_sin_rcnt_rev_tl_op, freq=FALSE, main="Histogram of mo_sin_rcnt_rev_tl_op", xlab="mo_sin_rcnt_rev_tl_op")
+hist(log(D3$mo_sin_rcnt_rev_tl_op+1), freq=FALSE, main="Histogram of log(mo_sin_rcnt_rev_tl_op + 1)", xlab="log(mo_sin_rcnt_rev_tl_op + 1)")
+boxplot(D3$mo_sin_rcnt_rev_tl_op, range=1.5)
+D3$mo_sin_rcnt_rev_tl_op <- log(D3$mo_sin_rcnt_rev_tl_op+1)
+```
+
+```{r}
+# purpose_p
+summary(factor(D3$purpose_p))
+barplot(table(D3$def_flag, D3$purpose_p), col=c("#00BFC4", "#F8766D"), legend = c('default', 'non-default'))
+D3$purpose_car <- as.numeric(D3$purpose_p=='car')
+D3$purpose_credit_card <- as.numeric(D3$purpose_p=='credit_card')
+D3$purpose_debt_consolidation <- as.numeric(D3$purpose_p=='debt_consolidation')
+D3$purpose_home_improvement <- as.numeric(D3$purpose_p=='home_improvement')
+D3$purpose_major_purchase <- as.numeric(D3$purpose_p=='major_purchase')
+D3$purpose_medical <- as.numeric(D3$purpose_p=='medical')
+D3$purpose_moving <- as.numeric(D3$purpose_p=='moving')
+D3$purpose_small_business <- as.numeric(D3$purpose_p=='small_business')
+D3$purpose_vacation <- as.numeric(D3$purpose_p=='vacation')
+D3 <- subset(D3, select = -c(purpose_p))
+```
+
+```{r}
+# term
+D3$term[which(D3$term==36)] <- 0
+D3$term[which(D3$term==60)] <- 1
+```
+
+
+```{r}
+# total_rev_hi_lim
+hist(D3$total_rev_hi_lim, freq=FALSE, main="Histogram of total_rev_hi_lim", xlab="total_rev_hi_lim")
+hist(log(D3$total_rev_hi_lim+100), freq=FALSE, main="Histogram of log(total_rev_hi_lim + 100)", xlab="log(total_rev_hi_lim + 100)")
+D3$total_rev_hi_lim <- log(D3$total_rev_hi_lim+100)
+```
+
+```{r}
+# verification_status
+summary(factor(D3$verification_status))
+barplot(table(D3$def_flag, D3$verification_status), col=c("#00BFC4", "#F8766D"), legend = c('default', 'non-default'))
+D3$verified <- as.numeric(D3$verification_status=='Verified')
+D3$source_verified <- as.numeric(D3$verification_status=='Source Verified')
+D3 <- subset(D3, select = -c(verification_status))
+```
+
+```{r}
+set.seed(1)
+D3_test <- D3[ix,]
+D3_train <- D3[-ix,]
+```
+
+```{r}
+# model 2
+glm2.out <- glm(def_flag ~ ., data = D3_train, family = binomial("logit"))
+summary(glm2.out)
+```
+
+```{r}
+yp2 <- predict(glm2.out, D3_test, type="response")
+roc(D3_train$def_flag, glm2.out$fitted.values)
+title(main="ROC curve for training data set")
+text(x = 0.15, y = 0.8, "AUC=0.6917391", cex=1.3)
+roc(D3_test$def_flag, yp2)
+title(main="ROC curve for test data set")
+text(x = 0.15, y = 0.8, "AUC=0.6906898", cex=1.3)
+```
+
+# LASSO
+```{r}
+library(glmnet)
+X <- data.matrix(D3_train)
+X <- X[,-1]
+lasso_cv <- cv.glmnet(X, D3_train$def_flag, type.measure="auc", alpha=1, family="binomial")
+plot(lasso_cv)
+best_lambda <- lasso_cv$lambda.min
+```
+
+```{r}
+best_lambda
+```
+
+```{r}
+glm3.out <- glmnet(X, D3_train$def_flag, alpha = 1, family = "binomial",lambda = best_lambda)
+coef(glm3.out)
+X_test <- data.matrix(D3_test)
+X_test <- X_test[,-1]
+yp3_train <- predict(glm3.out, X, type="response")
+yp3 <- predict(glm3.out, X_test, type="response")
+roc(D3_train$def_flag, yp3_train)
+roc(D3_test$def_flag, yp3)
+```
+
+```{r}
+D4_train <- subset(D3_train, select = -c(revol_bal, acc_now_delinq, chargeoff_within_12_mths, delinq_amnt, initial_list_status, num_accts_ever_120_pd, num_actv_bc_tl, num_bc_sats, open_acc, pub_rec_bankruptcies, purpose_credit_card, purpose_home_improvement, purpose_major_purchase, purpose_medical, purpose_vacation, own))
+D4_test <- subset(D3_test, select = -c(revol_bal, acc_now_delinq, chargeoff_within_12_mths, delinq_amnt, initial_list_status, num_accts_ever_120_pd, num_actv_bc_tl, num_bc_sats, open_acc, pub_rec_bankruptcies, purpose_credit_card, purpose_home_improvement, purpose_major_purchase, purpose_medical, purpose_vacation, own))
+```
+
+```{r}
+coef.glmnet(glm3.out)
+```
+
+```{r}
+glm4.out <- glm(def_flag ~ . , data = D4_train, family = binomial("logit"))
+summary(glm4.out)
+yp4 <- predict(glm4.out, D4_test, type="response")
+roc(D4_train$def_flag, glm4.out$fitted.values)
+title(main="ROC curve for training data set")
+text(x = 0.15, y = 0.8, "AUC=0.6914404", cex=1.3)
+roc(D4_test$def_flag, yp4)
+title(main="ROC curve for test data set")
+text(x = 0.15, y = 0.8, "AUC=0.6907965", cex=1.3)
+```
+
+
+# Interaction terms
+```{r}
+# model 4
+glm5.out <- glm(def_flag ~ . ^2, data = D4_train, family = binomial("logit"))
+summary(glm5.out)
+```
+
+```{r}
+yp5 <- predict(glm5.out, D4_test, type="response")
+roc(D4_train$def_flag, glm5.out$fitted.values)
+title(main="ROC curve for training data set")
+text(x = 0.15, y = 0.8, "AUC=0.7024593", cex=1.3)
+roc(D4_test$def_flag, yp5)
+title(main="ROC curve for test data set")
+text(x = 0.15, y = 0.8, "AUC=0.6915661", cex=1.3)
+```
+
+```{r}
+coef(summary(glm5.out))[,"Pr(>|z|)"] %>% t() %>% as_tibble() %>% gather(variable_name, value) %>% arrange(value)
+```
+
+```{r}
+glm6.out <- glm(def_flag ~ . + int_rate*grade + int_rate*annual_inc + loan_amnt*annual_inc, data = D4_train, family = binomial("logit"))
+summary(glm6.out)
+yp6 <- predict(glm6.out, D4_test, type="response")
+roc(D4_train$def_flag, glm6.out$fitted.values)
+title(main="ROC curve for training data set")
+text(x = 0.15, y = 0.8, "AUC=0.6920809", cex=1.3)
+roc(D4_test$def_flag, yp6)
+title(main="ROC curve for test data set")
+text(x = 0.15, y = 0.8, "AUC=0.6910832", cex=1.3)
+```
+
+```{r}
+summary(glm6.out)
+```
+
+# segmentation on verification
+```{r}
+seg_1_train <- D3_train[(D3_train$verified==1),]
+seg_2_train <- D3_train[(D3_train$source_verified==1),]
+seg_3_train <- D3_train[(D3_train$verified==0 & D3_train$source_verified==0),]
+seg_1_test <- D3_test[(D3_test$verified==1),]
+seg_2_test <- D3_test[(D3_test$source_verified==1),]
+seg_3_test <- D3_test[(D3_test$verified==0 & D3_test$source_verified==0),]
+
+seg_1_train <- subset(seg_1_train, select = -c(verified, source_verified))
+seg_2_train <- subset(seg_2_train, select = -c(verified, source_verified))
+seg_3_train <- subset(seg_3_train, select = -c(verified, source_verified))
+seg_1_test <-  subset(seg_1_test, select = -c(verified, source_verified))
+seg_2_test <-  subset(seg_2_test, select = -c(verified, source_verified))
+seg_3_test <-  subset(seg_3_test, select = -c(verified, source_verified))
+```
+
+```{r}
+X_seg_train_1 <- data.matrix(seg_1_train)
+Y_seg_train_1 <- X_seg_train_1[,1]
+X_seg_train_1 <- X_seg_train_1[,-1]
+lasso_cv_1 <- cv.glmnet(X_seg_train_1, Y_seg_train_1, type.measure="auc", alpha=1, family="binomial")
+plot(lasso_cv_1)
+best_lambda <- lasso_cv_1$lambda.min
+glm7.out <- glmnet(X_seg_train_1, Y_seg_train_1, alpha = 1, family = "binomial",lambda = best_lambda)
+coef(glm7.out)
+X_seg_test_1 <- data.matrix(seg_1_test)
+Y_seg_test_1 <- X_seg_test_1[,1]
+X_seg_test_1 <- X_seg_test_1[,-1]
+yp7_train <- predict(glm7.out, X_seg_train_1, type="response")
+yp7 <- predict(glm7.out, X_seg_test_1, type="response")
+```
+
+```{r}
+X_seg_train_2 <- data.matrix(seg_2_train)
+Y_seg_train_2 <- X_seg_train_2[,1]
+X_seg_train_2 <- X_seg_train_2[,-1]
+lasso_cv_2 <- cv.glmnet(X_seg_train_2, Y_seg_train_2, type.measure="auc", alpha=1, family="binomial")
+plot(lasso_cv_2)
+best_lambda <- lasso_cv_2$lambda.min
+glm8.out <- glmnet(X_seg_train_2, Y_seg_train_2, alpha = 1, family = "binomial",lambda = best_lambda)
+coef(glm8.out)
+X_seg_test_2 <- data.matrix(seg_2_test)
+Y_seg_test_2 <- X_seg_test_2[,1]
+X_seg_test_2 <- X_seg_test_2[,-1]
+yp8_train <- predict(glm8.out, X_seg_train_2, type="response")
+yp8 <- predict(glm8.out, X_seg_test_2, type="response")
+```
+
+```{r}
+X_seg_train_3 <- data.matrix(seg_3_train)
+Y_seg_train_3 <- X_seg_train_3[,1]
+X_seg_train_3 <- X_seg_train_3[,-1]
+lasso_cv_3 <- cv.glmnet(X_seg_train_3, Y_seg_train_3, type.measure="auc", alpha=1, family="binomial")
+plot(lasso_cv_3)
+best_lambda <- lasso_cv_3$lambda.min
+glm9.out <- glmnet(X_seg_train_3, Y_seg_train_3, alpha = 1, family = "binomial",lambda = best_lambda)
+coef(glm9.out)
+X_seg_test_3 <- data.matrix(seg_3_test)
+Y_seg_test_3 <- X_seg_test_3[,1]
+X_seg_test_3 <- X_seg_test_3[,-1]
+yp9_train <- predict(glm9.out, X_seg_train_3, type="response")
+yp9 <- predict(glm9.out, X_seg_test_3, type="response")
+```
+
+```{r}
+Y_train <- c(Y_seg_train_1, Y_seg_train_2, Y_seg_train_3)
+Y_test <- c(Y_seg_test_1, Y_seg_test_2, Y_seg_test_3)
+yp_train <- c(yp7_train, yp8_train, yp9_train)
+yp_test <- c(yp7, yp8, yp9)
+roc(Y_train, yp_train)
+title(main="ROC curve for training data set")
+text(x = 0.15, y = 0.8, "AUC=0.6938841", cex=1.3)
+roc(Y_test, yp_test)
+title(main="ROC curve for test data set")
+text(x = 0.15, y = 0.8, "AUC=0.6895375", cex=1.3)
+```
+
+# segmentation on initial_list_status
+```{r}
+seg_1_train <- D3_train[(D3_train$initial_list_status==0),]
+seg_2_train <- D3_train[(D3_train$initial_list_status==1),]
+seg_1_test <- D3_test[(D3_test$initial_list_status==0),]
+seg_2_test <- D3_test[(D3_test$initial_list_status==1),]
+
+seg_1_train <- subset(seg_1_train, select = -c(initial_list_status))
+seg_2_train <- subset(seg_2_train, select = -c(initial_list_status))
+seg_1_test <-  subset(seg_1_test, select = -c(initial_list_status))
+seg_2_test <-  subset(seg_2_test, select = -c(initial_list_status))
+```
+
+```{r}
+X_seg_train_1 <- data.matrix(seg_1_train)
+Y_seg_train_1 <- X_seg_train_1[,1]
+X_seg_train_1 <- X_seg_train_1[,-1]
+lasso_cv_1 <- cv.glmnet(X_seg_train_1, Y_seg_train_1, type.measure="auc", alpha=1, family="binomial")
+plot(lasso_cv_1)
+best_lambda <- lasso_cv_1$lambda.min
+glm7.out <- glmnet(X_seg_train_1, Y_seg_train_1, alpha = 1, family = "binomial",lambda = best_lambda)
+coef(glm7.out)
+X_seg_test_1 <- data.matrix(seg_1_test)
+Y_seg_test_1 <- X_seg_test_1[,1]
+X_seg_test_1 <- X_seg_test_1[,-1]
+yp7_train <- predict(glm7.out, X_seg_train_1, type="response")
+yp7 <- predict(glm7.out, X_seg_test_1, type="response")
+```
+
+
+```{r}
+X_seg_train_2 <- data.matrix(seg_2_train)
+Y_seg_train_2 <- X_seg_train_2[,1]
+X_seg_train_2 <- X_seg_train_2[,-1]
+lasso_cv_2 <- cv.glmnet(X_seg_train_2, Y_seg_train_2, type.measure="auc", alpha=1, family="binomial")
+plot(lasso_cv_2)
+best_lambda <- lasso_cv_2$lambda.min
+glm8.out <- glmnet(X_seg_train_2, Y_seg_train_2, alpha = 1, family = "binomial",lambda = best_lambda)
+coef(glm8.out)
+X_seg_test_2 <- data.matrix(seg_2_test)
+Y_seg_test_2 <- X_seg_test_2[,1]
+X_seg_test_2 <- X_seg_test_2[,-1]
+yp8_train <- predict(glm8.out, X_seg_train_2, type="response")
+yp8 <- predict(glm8.out, X_seg_test_2, type="response")
+```
+
+```{r}
+Y_train <- c(Y_seg_train_1, Y_seg_train_2)
+Y_test <- c(Y_seg_test_1, Y_seg_test_2)
+yp_train <- c(yp7_train, yp8_train)
+yp_test <- c(yp7, yp8)
+roc(Y_train, yp_train)
+roc(Y_test, yp_test)
+```
+
+# segmentation on home_ownership
+```{r}
+seg_1_train <- D3_train[(D3_train$rent==1),]
+seg_2_train <- D3_train[(D3_train$own==1),]
+seg_3_train <- D3_train[(D3_train$rent==0 & D3_train$own==0),]
+seg_1_test <- D3_test[(D3_test$rent==1),]
+seg_2_test <- D3_test[(D3_test$own==1),]
+seg_3_test <- D3_test[(D3_test$rent==0 & D3_test$own==0),]
+
+seg_1_train <- subset(seg_1_train, select = -c(rent, own))
+seg_2_train <- subset(seg_2_train, select = -c(rent, own))
+seg_3_train <- subset(seg_3_train, select = -c(rent, own))
+seg_1_test <-  subset(seg_1_test, select = -c(rent, own))
+seg_2_test <-  subset(seg_2_test, select = -c(rent, own))
+seg_3_test <-  subset(seg_3_test, select = -c(rent, own))
+```
+
+```{r}
+X_seg_train_1 <- data.matrix(seg_1_train)
+Y_seg_train_1 <- X_seg_train_1[,1]
+X_seg_train_1 <- X_seg_train_1[,-1]
+lasso_cv_1 <- cv.glmnet(X_seg_train_1, Y_seg_train_1, type.measure="auc", alpha=1, family="binomial")
+plot(lasso_cv_1)
+best_lambda <- lasso_cv_1$lambda.min
+glm7.out <- glmnet(X_seg_train_1, Y_seg_train_1, alpha = 1, family = "binomial",lambda = best_lambda)
+coef(glm7.out)
+X_seg_test_1 <- data.matrix(seg_1_test)
+Y_seg_test_1 <- X_seg_test_1[,1]
+X_seg_test_1 <- X_seg_test_1[,-1]
+yp7_train <- predict(glm7.out, X_seg_train_1, type="response")
+yp7 <- predict(glm7.out, X_seg_test_1, type="response")
+```
+
+```{r}
+X_seg_train_2 <- data.matrix(seg_2_train)
+Y_seg_train_2 <- X_seg_train_2[,1]
+X_seg_train_2 <- X_seg_train_2[,-1]
+lasso_cv_2 <- cv.glmnet(X_seg_train_2, Y_seg_train_2, type.measure="auc", alpha=1, family="binomial")
+plot(lasso_cv_2)
+best_lambda <- lasso_cv_2$lambda.min
+glm8.out <- glmnet(X_seg_train_2, Y_seg_train_2, alpha = 1, family = "binomial",lambda = best_lambda)
+coef(glm8.out)
+X_seg_test_2 <- data.matrix(seg_2_test)
+Y_seg_test_2 <- X_seg_test_2[,1]
+X_seg_test_2 <- X_seg_test_2[,-1]
+yp8_train <- predict(glm8.out, X_seg_train_2, type="response")
+yp8 <- predict(glm8.out, X_seg_test_2, type="response")
+```
+
+```{r}
+X_seg_train_3 <- data.matrix(seg_3_train)
+Y_seg_train_3 <- X_seg_train_3[,1]
+X_seg_train_3 <- X_seg_train_3[,-1]
+lasso_cv_3 <- cv.glmnet(X_seg_train_3, Y_seg_train_3, type.measure="auc", alpha=1, family="binomial")
+plot(lasso_cv_3)
+best_lambda <- lasso_cv_3$lambda.min
+glm9.out <- glmnet(X_seg_train_3, Y_seg_train_3, alpha = 1, family = "binomial",lambda = best_lambda)
+coef(glm9.out)
+X_seg_test_3 <- data.matrix(seg_3_test)
+Y_seg_test_3 <- X_seg_test_3[,1]
+X_seg_test_3 <- X_seg_test_3[,-1]
+yp9_train <- predict(glm9.out, X_seg_train_3, type="response")
+yp9 <- predict(glm9.out, X_seg_test_3, type="response")
+```
+
+```{r}
+Y_train <- c(Y_seg_train_1, Y_seg_train_2, Y_seg_train_3)
+Y_test <- c(Y_seg_test_1, Y_seg_test_2, Y_seg_test_3)
+yp_train <- c(yp7_train, yp8_train, yp9_train)
+yp_test <- c(yp7, yp8, yp9)
+roc(Y_train, yp_train)
+roc(Y_test, yp_test)
+```
+
+# segmentation on grade
+```{r}
+seg_1_train <- D3_train[(D3_train$grade==1),]
+seg_2_train <- D3_train[(D3_train$grade==2),]
+seg_3_train <- D3_train[(D3_train$grade==3),]
+seg_4_train <- D3_train[(D3_train$grade==4),]
+seg_5_train <- D3_train[(D3_train$grade==5),]
+seg_6_train <- D3_train[(D3_train$grade==6),]
+seg_7_train <- D3_train[(D3_train$grade==7),]
+seg_1_test <- D3_test[(D3_test$grade==1),]
+seg_2_test <- D3_test[(D3_test$grade==2),]
+seg_3_test <- D3_test[(D3_test$grade==3),]
+seg_4_test <- D3_test[(D3_test$grade==4),]
+seg_5_test <- D3_test[(D3_test$grade==5),]
+seg_6_test <- D3_test[(D3_test$grade==6),]
+seg_7_test <- D3_test[(D3_test$grade==7),]
+
+seg_1_train <- subset(seg_1_train, select = -c(grade))
+seg_2_train <- subset(seg_2_train, select = -c(grade))
+seg_3_train <- subset(seg_3_train, select = -c(grade))
+seg_4_train <- subset(seg_4_train, select = -c(grade))
+seg_5_train <- subset(seg_5_train, select = -c(grade))
+seg_6_train <- subset(seg_6_train, select = -c(grade))
+seg_7_train <- subset(seg_7_train, select = -c(grade))
+seg_1_test <-  subset(seg_1_test, select = -c(grade))
+seg_2_test <-  subset(seg_2_test, select = -c(grade))
+seg_3_test <-  subset(seg_3_test, select = -c(grade))
+seg_4_test <-  subset(seg_4_test, select = -c(grade))
+seg_5_test <-  subset(seg_5_test, select = -c(grade))
+seg_6_test <-  subset(seg_6_test, select = -c(grade))
+seg_7_test <-  subset(seg_7_test, select = -c(grade))
+```
+
+```{r}
+X_seg_train_1 <- data.matrix(seg_1_train)
+Y_seg_train_1 <- X_seg_train_1[,1]
+X_seg_train_1 <- X_seg_train_1[,-1]
+lasso_cv_1 <- cv.glmnet(X_seg_train_1, Y_seg_train_1, type.measure="auc", alpha=1, family="binomial")
+plot(lasso_cv_1)
+best_lambda <- lasso_cv_1$lambda.min
+glm7.out <- glmnet(X_seg_train_1, Y_seg_train_1, alpha = 1, family = "binomial",lambda = best_lambda)
+coef(glm7.out)
+X_seg_test_1 <- data.matrix(seg_1_test)
+Y_seg_test_1 <- X_seg_test_1[,1]
+X_seg_test_1 <- X_seg_test_1[,-1]
+yp7_train <- predict(glm7.out, X_seg_train_1, type="response")
+yp7 <- predict(glm7.out, X_seg_test_1, type="response")
+```
+
+```{r}
+X_seg_train_2 <- data.matrix(seg_2_train)
+Y_seg_train_2 <- X_seg_train_2[,1]
+X_seg_train_2 <- X_seg_train_2[,-1]
+lasso_cv_2 <- cv.glmnet(X_seg_train_2, Y_seg_train_2, type.measure="auc", alpha=1, family="binomial")
+plot(lasso_cv_2)
+best_lambda <- lasso_cv_2$lambda.min
+glm8.out <- glmnet(X_seg_train_2, Y_seg_train_2, alpha = 1, family = "binomial",lambda = best_lambda)
+coef(glm8.out)
+X_seg_test_2 <- data.matrix(seg_2_test)
+Y_seg_test_2 <- X_seg_test_2[,1]
+X_seg_test_2 <- X_seg_test_2[,-1]
+yp8_train <- predict(glm8.out, X_seg_train_2, type="response")
+yp8 <- predict(glm8.out, X_seg_test_2, type="response")
+```
+
+```{r}
+X_seg_train_3 <- data.matrix(seg_3_train)
+Y_seg_train_3 <- X_seg_train_3[,1]
+X_seg_train_3 <- X_seg_train_3[,-1]
+lasso_cv_3 <- cv.glmnet(X_seg_train_3, Y_seg_train_3, type.measure="auc", alpha=1, family="binomial")
+plot(lasso_cv_3)
+best_lambda <- lasso_cv_3$lambda.min
+glm9.out <- glmnet(X_seg_train_3, Y_seg_train_3, alpha = 1, family = "binomial",lambda = best_lambda)
+coef(glm9.out)
+X_seg_test_3 <- data.matrix(seg_3_test)
+Y_seg_test_3 <- X_seg_test_3[,1]
+X_seg_test_3 <- X_seg_test_3[,-1]
+yp9_train <- predict(glm9.out, X_seg_train_3, type="response")
+yp9 <- predict(glm9.out, X_seg_test_3, type="response")
+```
+
+```{r}
+X_seg_train_4 <- data.matrix(seg_4_train)
+Y_seg_train_4 <- X_seg_train_4[,1]
+X_seg_train_4 <- X_seg_train_4[,-1]
+lasso_cv_4 <- cv.glmnet(X_seg_train_4, Y_seg_train_4, type.measure="auc", alpha=1, family="binomial")
+plot(lasso_cv_4)
+best_lambda <- lasso_cv_4$lambda.min
+glm10.out <- glmnet(X_seg_train_4, Y_seg_train_4, alpha = 1, family = "binomial",lambda = best_lambda)
+coef(glm10.out)
+X_seg_test_4 <- data.matrix(seg_4_test)
+Y_seg_test_4 <- X_seg_test_4[,1]
+X_seg_test_4 <- X_seg_test_4[,-1]
+yp10_train <- predict(glm10.out, X_seg_train_4, type="response")
+yp10 <- predict(glm10.out, X_seg_test_4, type="response")
+```
+
+```{r}
+X_seg_train_5 <- data.matrix(seg_5_train)
+Y_seg_train_5 <- X_seg_train_5[,1]
+X_seg_train_5 <- X_seg_train_5[,-1]
+lasso_cv_5 <- cv.glmnet(X_seg_train_5, Y_seg_train_5, type.measure="auc", alpha=1, family="binomial")
+plot(lasso_cv_5)
+best_lambda <- lasso_cv_5$lambda.min
+glm11.out <- glmnet(X_seg_train_5, Y_seg_train_5, alpha = 1, family = "binomial",lambda = best_lambda)
+coef(glm11.out)
+X_seg_test_5 <- data.matrix(seg_5_test)
+Y_seg_test_5 <- X_seg_test_5[,1]
+X_seg_test_5 <- X_seg_test_5[,-1]
+yp11_train <- predict(glm11.out, X_seg_train_5, type="response")
+yp11 <- predict(glm11.out, X_seg_test_5, type="response")
+```
+
+```{r}
+X_seg_train_6 <- data.matrix(seg_6_train)
+Y_seg_train_6 <- X_seg_train_6[,1]
+X_seg_train_6 <- X_seg_train_6[,-1]
+lasso_cv_6 <- cv.glmnet(X_seg_train_6, Y_seg_train_6, type.measure="auc", alpha=1, family="binomial")
+plot(lasso_cv_6)
+best_lambda <- lasso_cv_6$lambda.min
+glm12.out <- glmnet(X_seg_train_6, Y_seg_train_6, alpha = 1, family = "binomial",lambda = best_lambda)
+coef(glm12.out)
+X_seg_test_6 <- data.matrix(seg_6_test)
+Y_seg_test_6 <- X_seg_test_6[,1]
+X_seg_test_6 <- X_seg_test_6[,-1]
+yp12_train <- predict(glm12.out, X_seg_train_6, type="response")
+yp12 <- predict(glm12.out, X_seg_test_6, type="response")
+```
+
+```{r}
+X_seg_train_7 <- data.matrix(seg_7_train)
+Y_seg_train_7 <- X_seg_train_7[,1]
+X_seg_train_7 <- X_seg_train_7[,-1]
+lasso_cv_7 <- cv.glmnet(X_seg_train_7, Y_seg_train_7, type.measure="auc", alpha=1, family="binomial")
+plot(lasso_cv_7)
+best_lambda <- lasso_cv_7$lambda.min
+glm13.out <- glmnet(X_seg_train_7, Y_seg_train_7, alpha = 1, family = "binomial",lambda = best_lambda)
+coef(glm13.out)
+X_seg_test_7 <- data.matrix(seg_7_test)
+Y_seg_test_7 <- X_seg_test_7[,1]
+X_seg_test_7 <- X_seg_test_7[,-1]
+yp13_train <- predict(glm13.out, X_seg_train_7, type="response")
+yp13 <- predict(glm13.out, X_seg_test_7, type="response")
+```
+
+```{r}
+Y_train <- c(Y_seg_train_1, Y_seg_train_2, Y_seg_train_3, Y_seg_train_4, Y_seg_train_5, Y_seg_train_6, Y_seg_train_7)
+Y_test <- c(Y_seg_test_1, Y_seg_test_2, Y_seg_test_3, Y_seg_test_4, Y_seg_test_5, Y_seg_test_6, Y_seg_test_7)
+yp_train <- c(yp7_train, yp8_train, yp9_train, yp10_train, yp11_train, yp12_train, yp13_train)
+yp_test <- c(yp7, yp8, yp9, yp10, yp11, yp12, yp13)
+roc(Y_train, yp_train)
+roc(Y_test, yp_test)
+```
+
