@@ -1,1 +1,1 @@
-# MATH60131-Consumer-Credit-Risk-Modelling
+# Building a Credit Scorecard
